@@ -1,0 +1,198 @@
+Rain System 全项目源码阅读顺序
+
+这份顺序覆盖 Assets 中的 57 个 C# 与 62 个 Shader/HLSL/CGInclude/Compute 文件。C# 和 Shader 各自独立编号。先沿运行时数据流读，再读同一功能的编辑器代码。以下路径以前缀表示：
+
+- W = Assets/NOT_Lonely/Weatherade SRS/
+- F = Assets/NOT_Lonely/FirstPersonController/
+- T = Assets/NOT_Lonely/TotalBrush/
+- B = Assets/NOT_Lonely/BatchShaderSwapper/
+- U = Assets/TutorialInfo/
+
+每读一个文件，记下 谁调用它、输入从哪里来、修改了什么、结果送往哪里。Shader 还要记下 Properties、keyword、Pass、纹理通道和坐标空间。结合示例场景实际参数读，效果会更容易对应。
+
+0. 先建立场景坐标系（配置，不计入代码文件）
+
+依次看 ProjectSettings/ProjectVersion.txt、Packages/manifest.json、ProjectSettings/ProjectSettings.asset、W/Samples/BasicSetupSnow.unity、W/Samples/SharedContent/URP Settings/、W/Resources/SRS_DepthRenderer.asset、W/Samples/SharedContent/PostProcessSnow.asset，然后浏览雪材质和纹理。确认 Unity 2022.3、URP 14、Linear、场景对象、材质覆写与独立深度 Renderer。
+
+1. 先读看得见的角色反馈（4 C#）
+
+1. F/SimpleFPController.cs：输入、视角、CharacterController、相机动画切换。
+2. F/NL_Footsteps.cs：物理材质识别、脚步状态、音效与粒子回调。
+3. W/Samples/SharedContent/Scripts/SimpleGun.cs：投射物生成。
+4. W/Samples/SharedContent/Scripts/Projectile.cs：碰撞、雪面击中特效。
+
+接着检查 F/FPCamShake.controller、F/CamShakeIdle.anim、CamShakeWalk.anim、CamShakeRun.anim，以及 W/Samples/SharedContent/Anim/Footsteps*.anim 和角色 Prefab。理解脚本状态、Animator 曲线、动画事件如何协作。
+
+2. 运行时基础设施（6 C#）
+
+5. W/Scripts/SRS_Manager.cs：全局引用和灯光列表。
+6. W/Scripts/Extra/NL_Utilities.cs：资源、RT、噪声和对象搜索工具。
+7. W/Scripts/Extra/SRS_DataTransfer.cs：相机回调与深度目标传递。
+8. W/Scripts/URP_RendererSetter.cs：专用 Renderer 的配置。
+9. W/Scripts/SRS_RenderDepthWithReplacement.cs：URP Renderer Feature、替换 Shader、绘制筛选。
+10. W/Scripts/CoverageBase.cs：雪雨共用的覆盖体、深度相机、材质同步和生命周期。
+
+读完应能画出 CoverageBase → Camera.Render → Render Feature → RenderTexture → Shader 全局纹理。
+
+3. 深度编码与遮挡公式（4 Shader/HLSL）
+
+1. W/Shaders/Extra/DepthRenderer.shader：替换渲染如何写深度；先读实际 Pass，末尾 Amplify 数据放到最后看。
+2. W/Shaders/Blit/TexturePacking.shader：深度指数变换与两阶矩编码。
+3. W/Shaders/Blit/NL_GaussianBlur.shader：水平、垂直模糊的多个通道版本。
+4. W/Shaders/Includes/SRS_CoverageCommon.hlsl：切比雪夫上界、方向遮罩、区域边界、绘制遮罩、随机采样等基础函数。
+
+
+4. 网格积雪与光照（1 C#、13 Shader/HLSL）
+
+11. W/Scripts/SnowCoverage.cs：积雪参数、keyword、材质覆写与网格/地形 Shader 选择。
+5. W/Shaders/Includes/SRS_Triplanar.hlsl：世界空间三向投影与法线处理。
+6. W/Shaders/Includes/SRS_SnowCoverage.hlsl：积雪率、颜色、法线、雪痕合成及位移，核心算法。
+7. W/Shaders/Includes/SRS_LightingCommon.hlsl：闪光和次表面近似的独立函数。
+8. W/Shaders/Includes/SRS_Lighting.hlsl：把积雪光照效果接入 URP PBR。
+9. W/Shaders/Includes/SRS_LitInputSnow.hlsl：雪材质属性、纹理和采样声明。
+10. W/Shaders/Includes/SRS_LitForwardPass.hlsl：网格前向渲染时调用积雪算法。
+11. W/Shaders/SnowCoverage/MeshRender/SnowCoverage.shader：各 Pass、keyword、材质属性的总入口。
+12. W/Shaders/Includes/SRS_LitGBufferPass.hlsl：延迟路径。
+13. W/Shaders/Includes/SRS_DepthOnlyPass.hlsl：深度 Pass。
+14. W/Shaders/Includes/SRS_LitDepthNormalsPass.hlsl：深度法线 Pass。
+15. W/Shaders/Includes/SRS_ShadowCasterPass.hlsl：阴影投射 Pass。
+16. W/Shaders/Includes/SRS_Tessellation.hlsl：曲面细分。
+17. W/Shaders/SnowCoverage/MeshRender/SnowCoverage (Tessellation).shader：细分版本网格材质。
+
+先让自己能回答：雪盖在哪里？雪色与原材质如何混合？为什么法线和位移都要读雪痕？Forward、GBuffer、Depth、Shadow 为什么需要分别处理？
+
+5. 动态雪痕（2 C#、2 Shader）
+
+12. W/Scripts/SRS_Tracer.cs：动态物体的深度代理。
+13. W/Scripts/SRS_TraceMaskGenerator.cs：两台相机、历史纹理、模糊、噪声和法线图生成。
+18. W/Shaders/Extra/DepthOccluder.shader：痕迹物体的深度代理材质。
+19. W/Shaders/Blit/TraceMaskGen.shader：接触比较、痕迹细节、法线与高度打包。
+
+重点跟踪 surfaceDepthRT / traceObjsRT → traceMaskRT → bluredRT → finalTraceMask → traceTex，再回到 SRS_SnowCoverage.hlsl 看 RGBA 四通道如何影响颜色、法线与位移。
+
+6. GPU 飘雪（2 C#、2 Shader）
+
+14. W/Scripts/Extra/VisibilityCheck.cs：渲染可见性回调。
+15. W/Scripts/SRS_ParticleSystem.cs：按字段、初始化、网格生成、RT 模拟、碰撞、渲染更新的顺序读。
+20. W/Shaders/ParticleSystem/SRS_ParticleSystem_Simulation.shader：每粒子一个纹素的状态更新。
+21. W/Shaders/ParticleSystem/SRS_ParticleSystem_Render.shader：状态纹理驱动四边形、纹理、光照、软粒子和闪光。
+
+重点理解双 RT 交替、顶点纹理读取、粒子索引到纹素的映射、预热以及深度碰撞。两个 Shader 末尾的 Amplify 图节点数据作为生成器元数据阅读。
+
+7. Terrain 雪面、远景与烘焙（1 C#、14 Shader/HLSL）
+
+16. W/Scripts/SRS_TerrainUtility.cs：远景 Albedo/Normal 贴图烘焙与 Terrain 包围盒。
+22. W/Shaders/Includes/SRS_TerrainLitInput.hlsl
+23. W/Shaders/Includes/SRS_TerrainLitPasses.hlsl
+24. W/Shaders/SnowCoverage/TerrainRender/SnowCoverage (Terrain).shader
+25. W/Shaders/SnowCoverage/TerrainRender/SnowCoverage (Terrain Add Pass).shader
+26. W/Shaders/Includes/SRS_TerrainDepthOnlyPass.hlsl
+27. W/Shaders/Includes/SRS_TerrainLitDepthNormalsPass.hlsl
+28. W/Shaders/Includes/SRS_TerrainShadowCasterPass.hlsl
+29. W/Shaders/Includes/SRS_Tessellation_ASE.hlsl
+30. W/Shaders/SnowCoverage/TerrainRender/SnowCoverage (Terrain-Tessellation).shader
+31. W/Shaders/SnowCoverage/TerrainRender/SnowCoverage (Terrain Add Pass-Tessellation).shader
+32. W/Shaders/Includes/SRS_TerrainBake.hlsl
+33. W/Shaders/SnowCoverage/TerrainBake/SnowCoverage (Terrain-Bake).shader
+34. W/Shaders/SnowCoverage/TerrainBake/SnowCoverage (Terrain Add Pass-Bake).shader
+35. W/Shaders/SnowCoverage/TerrainBake/SnowCoverage (Terrain-BaseGen).shader
+
+这一章对照 Terrain_snow.mat，特别注意单个材质对 Traces、Displacement、Tessellation 的独立覆写。
+
+8. 雨系统及示例控制（3 C#、8 Shader/HLSL）
+
+17. W/Scripts/RainCoverage.cs：共用 CoverageBase 之上的湿润、积水、波纹、雨滴。
+18. W/Scripts/Examples/RealtimeCoverageAmountChange.cs：动态调雪量。
+19. W/Scripts/Examples/RealtimeRainChange.cs：动态雨参数。
+36. W/Shaders/Includes/SRS_RainCoverage.hlsl
+37. W/Shaders/Includes/SRS_LitInputRain.hlsl
+38. W/Shaders/Includes/SRS_TerrainLitInputRain.hlsl
+39. W/Shaders/RainCoverage/MeshRender/RainCoverage.shader
+40. W/Shaders/RainCoverage/TerrainRender/RainCoverage_Terrain_FirstPass.shader
+41. W/Shaders/RainCoverage/TerrainRender/RainCoverage_Terrain_AddPass.shader
+42. W/Shaders/RainCoverage/TerrainBake/RainCoverage_TerrainBake_FirstPass.shader
+43. W/Shaders/RainCoverage/TerrainBake/RainCoverage_TerrainBake_AddPass.shader
+
+读完比较雪与雨如何复用深度覆盖框架，雨独有的动画纹理、波纹和水面参数如何进入 PBR。
+
+9. Built-in 管线版本（13 Shader/CGInclude）
+
+当前项目启用了 URP，这组文件放在理解 URP 路径后读，用来比较同一效果在不同渲染管线中的接入方式。
+
+44. W/Shaders/CGIncludes/SRS_Base.cginc
+45. W/Shaders/CGIncludes/SRS_CoverageCommon.cginc
+46. W/Shaders/CGIncludes/SRS_SnowCoverage.cginc
+47. W/Shaders/CGIncludes/SRS_RainCoverage.cginc
+48. W/Shaders/CGIncludes/SRS_Lighting.cginc
+49. W/Shaders/CGIncludes/SRS_DeferredShading.cginc
+50. W/Shaders/CGIncludes/SRS_VertFrag.cginc
+51. W/Shaders/CGIncludes/SRS_Tessellation.cginc
+52. W/Shaders/CGIncludes/SRS_Lightmapping.cginc
+53. W/Shaders/CGIncludes/SRS_TerrainSplatmix.cginc
+54. W/Shaders/CGIncludes/SRS_TerrainLightmapping.cginc
+55. W/Shaders/CGIncludes/SRS_TerrainBake.cginc
+56. W/Shaders/Extra/DeferredShading.shader
+
+10. TotalBrush 绘制系统（14 C#、4 Shader/Compute）
+
+20. T/Scripts/Data/NL_PaintableObjectData.cs
+21. T/Scripts/NL_PaintableObject.cs
+22. T/Scripts/NL_TotalBrushUtilities.cs
+23. T/Scripts/Tools/NL_BrushTool.cs
+24. T/Scripts/Tools/NL_FillTool.cs
+25. T/Scripts/Tools/NL_GradientFillTool.cs
+57. T/Shaders/Compute/NL_TotalBrush_Compute.compute
+58. T/Shaders/NL_MaskPainting.shader
+59. T/Shaders/NL_Dithering.shader
+60. T/Shaders/NL_VertexDebug.shader
+26. T/Scripts/Editor/NL_TotalBrush.cs
+27. T/Scripts/Editor/NL_PaintableObject_UI.cs
+28. T/Scripts/Editor/NL_IsolationStage.cs
+29. T/Scripts/Editor/NL_IsolationModeWindow.cs
+30. T/Scripts/Editor/NL_TotalBrushOverlay.cs
+31. T/Scripts/Editor/NL_TotalBrushOverlayBtn.cs
+32. T/Scripts/NL_TotalBrushStyles.cs
+33. T/Scripts/NormalsDebugger.cs
+
+重点理解绘制数据存在哪、如何写顶点色/贴图、Compute Shader 执行什么、Editor 工具如何与 SceneView 交互。
+
+11. Weatherade Inspector 与材质 GUI（18 C#）
+
+34. W/Scripts/Extra/VectorLabelsAttribute.cs
+35. W/Scripts/Editor/VectorLabelsAttributeDrawer.cs
+36. W/Scripts/Extra/NL_Styles.cs
+37. W/Scripts/Editor/SnowCoverage_editor.cs
+38. W/Scripts/Editor/SRS_TraceMaskGenerator_editor.cs
+39. W/Scripts/Editor/SRS_Particles_editor.cs
+40. W/Scripts/Editor/SRS_TerrainUtility_editor.cs
+41. W/Scripts/Editor/RainCoverage_editor.cs
+42. W/Shaders/Editor/NL_MaterialEditorExtensions.cs
+43. W/Shaders/Editor/SRS_CoverageShaderGUI_base.cs
+44. W/Shaders/Editor/SnowShadersGUI.cs
+45. W/Shaders/Editor/NL_SRS_SnowCoverage_GUI.cs
+46. W/Shaders/Editor/NL_SRS_SnowCoverageTerrain_GUI.cs
+47. W/Shaders/Editor/RainShadersGUI.cs
+48. W/Shaders/Editor/NL_SRS_RainCoverage_GUI.cs
+49. W/Shaders/Editor/NL_SRS_RainCoverageTerrain_GUI.cs
+50. W/Shaders/Editor/URP_LitDetailGUI.cs
+51. W/Scripts/Editor/NL_VolumetricLight_editor.cs
+
+关注序列化属性、材质 keyword、局部覆写、Undo、Inspector 和 TerrainLayer 的编辑扩展。
+
+12. 额外视觉、安装工具与尾部文件（6 C#、2 Shader）
+
+52. W/Scripts/Extra/NL_VolumetricLight.cs
+61. W/Shaders/Extra/NL_PointLightHalo.shader
+62. W/Shaders/Extra/NL_SpotLightBeam.shader
+53. W/Scripts/StartScreen/SRS_VersionCheck.cs
+54. W/Scripts/StartScreen/SRS_StartScreen.cs
+55. B/BatchShaderSwapper.cs
+56. U/Scripts/Readme.cs
+57. U/Scripts/Editor/ReadmeEditor.cs
+
+这部分覆盖额外光效、包安装/版本检查、批量 Shader 替换和 Unity 教程模板。
+
+最后的非代码核对
+
+把场景、Prefab、材质、纹理导入设置、TerrainLayer、PostProcess、Animator Controller 和动画曲线逐项与读过的字段对应。Amplify Shader Editor 在部分 Shader 末尾保存的图节点元数据，以及 Unity .anim 的大量曲线采样，是文件行数很高的原因；分析时先关注真正执行的 HLSL/CG 代码和关键帧含义。
+
